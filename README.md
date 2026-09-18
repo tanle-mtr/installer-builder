@@ -19,7 +19,7 @@
 
 ### 方式一：使用成品
 
-从 [Releases](../../releases) 下载 `安装包制作器.exe`，双击运行，无需 Python 环境。
+从 [Releases](../../releases) 下载 **`InstallerBuilder.exe`**（Windows 可直接运行，无需 Python 环境）。
 
 ### 方式二：从源码运行
 
