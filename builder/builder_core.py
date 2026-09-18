@@ -195,22 +195,68 @@ def run_pyinstaller(script, out_dir, work_dir, name, icon_ico, add_data=None, lo
     return os.path.join(out_dir, name + ".exe")
 
 
+def build_python_main(config, icon_ico, work_dir, log=None):
+    """Python 入口脚本 → PyInstaller 壳（单文件 exe），供安装包作为主程序使用。
+
+    附加文件/文件夹通过 --add-data 内嵌进主程序（运行时位于 sys._MEIPASS）。
+    """
+    py = find_python_with_pyinstaller()
+    if not py:
+        raise RuntimeError(
+            "未找到可用的 PyInstaller。\n"
+            "请在命令行执行：pip install pyinstaller\n"
+            "然后重新生成安装包。")
+    entry = config["python_entry"]
+    name = config["app_name"].strip()
+    out = os.path.join(work_dir, "python_main")
+    os.makedirs(out, exist_ok=True)
+    cmd = [py, "-m", "PyInstaller",
+           "--noconfirm", "--clean", "--onefile", "--windowed",
+           "--name", name,
+           "--distpath", out,
+           "--workpath", os.path.join(work_dir, "work_pymain"),
+           "--specpath", os.path.join(work_dir, "spec_pymain")]
+    if icon_ico and os.path.exists(icon_ico):
+        cmd += ["--icon", icon_ico]
+    for item in config.get("extra_items") or []:
+        if os.path.exists(item):
+            cmd += ["--add-data", "%s;." % item]
+    cmd.append(entry)
+    if log:
+        log("[构建] " + " ".join(cmd) + "\n")
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ),
+                          creationflags=0x08000000, encoding="utf-8", errors="replace")
+    if log:
+        log((proc.stdout + proc.stderr)[-4000:] + "\n")
+    if proc.returncode != 0:
+        raise RuntimeError("PyInstaller 打包 Python 主程序失败，详见上方日志。")
+    return os.path.join(out, name + ".exe")
+
+
 def build_installer(config, out_dir, log=None):
     """
     config: {
-      app_name, version, publisher, exe_path, extra_items: [],
-      autostart, desktop_shortcut, startmenu_shortcut, icon_path
+      app_name, version, publisher, exe_path | python_entry,
+      extra_items: [], autostart, desktop_shortcut, startmenu_shortcut, icon_path
     }
+    支持两种主程序来源：
+      - exe_path:     现成可执行文件（.exe）
+      - python_entry: Python 入口脚本（.py/.pyw），自动经 PyInstaller 打包为 exe 再制作安装包
     产出: out_dir/setup_<name>.exe 与 out_dir/uninstall.exe
     """
     app_name = config["app_name"].strip()
     if not app_name:
         raise ValueError("应用名称不能为空")
+    python_entry = config.get("python_entry")
     exe_path = config.get("exe_path")
-    if not exe_path or not os.path.exists(exe_path):
-        raise ValueError("请先选择主程序文件")
-    if not os.path.splitext(exe_path)[1].lower() in (".exe", ".bat", ".cmd", ".com", ".lnk"):
-        raise ValueError("主程序应为可执行文件（.exe）")
+    if python_entry:
+        if not os.path.exists(python_entry):
+            raise ValueError("Python 入口脚本不存在，请重新选择")
+    elif exe_path and os.path.exists(exe_path):
+        if not os.path.splitext(exe_path)[1].lower() in (".exe", ".bat", ".cmd", ".com", ".lnk"):
+            raise ValueError("主程序应为可执行文件（.exe）")
+    else:
+        raise ValueError("请选择主程序文件（.exe）或 Python 入口脚本（.py）")
 
     out_dir = os.path.abspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
@@ -219,7 +265,6 @@ def build_installer(config, out_dir, log=None):
     work_dir = tempfile.mkdtemp(prefix="pkgbuild_")
     try:
         cfg = dict(config)
-        cfg["exe_name"] = os.path.basename(exe_path)
         cfg["app_key"] = app_key(app_name, config.get("publisher", ""))
         cfg["has_icon"] = bool(config.get("icon_path") and os.path.exists(config["icon_path"]))
         cfg.setdefault("version", "1.0.0")
@@ -244,6 +289,17 @@ def build_installer(config, out_dir, log=None):
             icon_ico = os.path.join(work_dir, "icon.ico")
             if not make_default_icon(icon_ico):
                 raise RuntimeError("默认图标生成失败：缺少 Pillow 且资源文件不可用。")
+
+        # Python 模式：先用 PyInstaller 把入口脚本打成 exe（壳）
+        if python_entry:
+            if log:
+                log("== PyInstaller 打包 Python 主程序（壳）==\n")
+            exe_path = build_python_main(cfg, icon_ico, work_dir, log)
+            cfg["exe_name"] = os.path.basename(exe_path)
+            # 附加文件已内嵌进主程序，不再随安装包单独携带
+            cfg["extra_items"] = []
+        else:
+            cfg["exe_name"] = os.path.basename(exe_path)
 
         # 复制应用负载
         app_dir, add_data, total_bytes = copy_app_payload(exe_path, cfg.get("extra_items"), work_dir)
