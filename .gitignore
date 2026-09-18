@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+*.spec
+
+# PyInstaller
+build/
+dist/
+*.pkg
+
+# 本地产物
+安装包制作器_源码.zip
+安装信息.json
