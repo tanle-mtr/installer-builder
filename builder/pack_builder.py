@@ -125,6 +125,7 @@ class PackBuilderApp:
         self.var_autostart = tk.BooleanVar(value=True)
         self.extra_items = []
         self.building = False
+        self.python_mode = False
         self._build_ui()
         self._set_default_icon()
 
@@ -167,13 +168,15 @@ class PackBuilderApp:
                                                             expand=True, ipady=6)
         MaterialButton(row2, "选择主程序", self._pick_exe, width=110,
                        height=36, font_size=12).pack(side="left", padx=(8, 0))
-        tk.Label(c2.inner, text="主程序将安装到目标目录并作为快捷方式指向的程序（支持 .exe）。",
-                 font=(FONT, 9), bg=BG, fg=TEXT_GRAY).pack(anchor="w", pady=(6, 4))
+        self.main_hint = tk.Label(c2.inner, text="主程序将安装到目标目录并作为快捷方式指向的程序（支持 .exe / .py）。",
+                                  font=(FONT, 9), bg=BG, fg=TEXT_GRAY)
+        self.main_hint.pack(anchor="w", pady=(6, 4))
 
         extra_header = tk.Frame(c2.inner, bg=BG)
         extra_header.pack(fill="x", pady=(8, 0))
-        tk.Label(extra_header, text="附加文件 / 文件夹（可选，随主程序一起安装）",
-                 font=(FONT, 10), bg=BG, fg=TEXT_GRAY).pack(side="left")
+        self.extra_hint = tk.Label(extra_header, text="附加文件 / 文件夹（可选，随主程序一起安装）",
+                                   font=(FONT, 10), bg=BG, fg=TEXT_GRAY)
+        self.extra_hint.pack(side="left")
         MaterialButton(extra_header, "添加", self._add_extra, primary=False,
                        width=64, height=28, font_size=10).pack(side="right")
         MaterialButton(extra_header, "删除选中", self._remove_extra, primary=False,
@@ -276,11 +279,26 @@ class PackBuilderApp:
     # ---------- 交互 ----------
     def _pick_exe(self):
         f = filedialog.askopenfilename(
-            title="选择主程序", filetypes=[("可执行文件", "*.exe"), ("所有文件", "*.*")])
+            title="选择主程序",
+            filetypes=[("可执行文件", "*.exe"), ("Python 脚本", "*.py *.pyw"), ("所有文件", "*.*")])
         if f:
             self.var_exe.set(f)
+            self._update_mode_hint()
             if not self.var_outdir.get():
                 self.var_outdir.set(os.path.join(os.path.dirname(f), "安装包"))
+
+    def _update_mode_hint(self):
+        p = self.var_exe.get().strip()
+        if p.lower().endswith((".py", ".pyw")):
+            self.python_mode = True
+            self.main_hint.configure(
+                text="Python 程序：将先用 PyInstaller 打包为独立 exe（壳），再生成安装包。")
+            self.extra_hint.configure(text="附加文件 / 文件夹（可选，内嵌进主程序 exe）")
+        else:
+            self.python_mode = False
+            self.main_hint.configure(
+                text="主程序将安装到目标目录并作为快捷方式指向的程序（支持 .exe / .py）。")
+            self.extra_hint.configure(text="附加文件 / 文件夹（可选，随主程序一起安装）")
 
     def _add_extra(self):
         files = filedialog.askopenfilenames(title="添加附加文件")
@@ -324,16 +342,18 @@ class PackBuilderApp:
             messagebox.showwarning("提示", "请填写应用名称")
             return
         if not exe or not os.path.exists(exe):
-            messagebox.showwarning("提示", "请选择主程序文件")
+            messagebox.showwarning("提示", "请选择主程序文件（.exe）或 Python 脚本（.py）")
             return
         if not outdir:
             messagebox.showwarning("提示", "请选择输出目录")
             return
+        is_py = exe.lower().endswith((".py", ".pyw"))
         config = {
             "app_name": name,
             "version": self.var_version.get().strip() or "1.0.0",
             "publisher": self.var_publisher.get().strip(),
-            "exe_path": exe,
+            "exe_path": None if is_py else exe,
+            "python_entry": exe if is_py else None,
             "extra_items": list(self.extra_items),
             "autostart": self.var_autostart.get(),
             "desktop_shortcut": self.var_desktop.get(),
